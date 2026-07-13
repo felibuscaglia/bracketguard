@@ -1,0 +1,13 @@
+[project]
+name = "bracketguard"
+version = "0.1.0"
+description = "Fast command-line linter for balanced brackets, quotes, and HTML/XML tags with precise error locations."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+bracketguard = "bracketguard.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
