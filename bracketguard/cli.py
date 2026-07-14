@@ -27,8 +27,10 @@ def _cmd_check(args: argparse.Namespace) -> int:
     result = check(content, filename=args.file)
     if result["ok"]:
         print("OK")
-    else:
+    elif result["expected"] is None:
         print(f"MISMATCH at line {result["line"]}, col {result["col"]}: {"unclosed" if result["is_opener"] else "unexpected"} '{result["value"]}'")
+    else:
+        print(f"MISMATCH at line {result["line"]}, col {result["col"]}: expected '{result["expected"]}' but found '{result["value"]}'")
     return 0 if result["ok"] else 1
 
 

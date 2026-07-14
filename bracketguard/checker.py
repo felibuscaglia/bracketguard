@@ -1,10 +1,12 @@
 from bracketguard.stack import Stack
 
-OPENERS = ["("]
-CLOSERS = [")"]
-MATCHERS = {
-    ")": "(",
-}
+PAIRS = (("(", ")"), ("[", "]"), ("{", "}"))
+
+OPENER_TO_CLOSER = dict(PAIRS)
+CLOSER_TO_OPENER = {c: o for o, c in PAIRS}
+
+OPENERS = OPENER_TO_CLOSER  # membership via `in`
+CLOSERS = CLOSER_TO_OPENER
 
 
 def check(content: str, filename: str) -> object:
@@ -18,13 +20,14 @@ def check(content: str, filename: str) -> object:
         elif char in CLOSERS:
             prev_opener = stack.pop().value if not stack.is_empty() else None
 
-            if prev_opener is None or MATCHERS[char] != prev_opener:
+            if prev_opener is None or CLOSER_TO_OPENER[char] != prev_opener:
                 return {
                     "ok": False,
                     "col": col,
                     "line": line,
                     "value": char,
-                    "is_opener": False
+                    "is_opener": False,
+                    "expected": OPENER_TO_CLOSER[prev_opener] if prev_opener is not None else None
                 }
         
         col += 1 if char != "\n" else 1
@@ -37,7 +40,8 @@ def check(content: str, filename: str) -> object:
             "col": last.position[0],
             "line": last.position[1],
             "value": last.value,
-            "is_opener": True
+            "is_opener": True,
+            "expected": None
         }
     else:
         return {"ok": True}
