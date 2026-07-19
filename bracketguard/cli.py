@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from . import __version__
-from .checker import check
+from .checker import ErrorKind, check
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
@@ -24,14 +24,24 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print(f"bracketguard: {args.file}: {exc.strerror}", file=sys.stderr)
         return 2
 
-    result = check(content, filename=args.file)
-    if result["ok"]:
+    result = check(content)
+
+    if result.ok:
         print("OK")
-    elif result["expected"] is None:
-        print(f"MISMATCH at line {result["line"]}, col {result["col"]}: {"unclosed" if result["is_opener"] else "unexpected"} '{result["value"]}'")
+        return 0
+
+    where = f"MISMATCH at line {result.line}, col {result.col}"
+
+    if result.kind is ErrorKind.UNTERMINATED_STRING:
+        print(f"{where}: unterminated string")
+    elif result.kind is ErrorKind.UNCLOSED_OPENER:
+        print(f"{where}: unclosed '{result.found}'")
+    elif result.expected is None:
+        print(f"{where}: unexpected '{result.found}'")
     else:
-        print(f"MISMATCH at line {result["line"]}, col {result["col"]}: expected '{result["expected"]}' but found '{result["value"]}'")
-    return 0 if result["ok"] else 1
+        print(f"{where}: expected '{result.expected}' but found '{result.found}'")
+
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,9 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser(
         "check", help="Check a file for balanced brackets, quotes, and tags."
     )
-    check_parser.add_argument(
-        "file", nargs="+", help="Path to the file to check."
-    )
+    check_parser.add_argument("file", nargs="+", help="Path to the file to check.")
     check_parser.set_defaults(func=_cmd_check, parser=check_parser)
 
     return parser
