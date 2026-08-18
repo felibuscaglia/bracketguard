@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -19,15 +19,21 @@ class ErrorKind(str, Enum):
 @dataclass(frozen=True)
 class CheckResult:
     ok: bool
+    depth: Optional[int] = None
     kind: Optional[ErrorKind] = None
     line: Optional[int] = None
     col: Optional[int] = None
     found: Optional[str] = None
     expected: Optional[str] = None
+    counts: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def success(cls) -> "CheckResult":
-        return cls(ok=True)
+    def success(
+        cls, depth: int, counts: Optional[dict[str, int]] = None
+    ) -> "CheckResult":
+        if counts is None:
+            counts = {opener: 0 for opener, _ in PAIRS}
+        return cls(ok=True, depth=depth, counts=counts)
 
     @classmethod
     def failure(
@@ -51,6 +57,9 @@ def check(content: str) -> CheckResult:
     quote_col = None
     quote_opened = False
     is_comment = False
+    depth = 0
+    curr_depth = 0
+    pair_counts = {opener: 0 for opener, _ in PAIRS}
 
     for index, char in enumerate(content):
         if char == "\n":
@@ -76,7 +85,10 @@ def check(content: str) -> CheckResult:
                     is_comment = True
                 elif char in OPENER_TO_CLOSER:
                     stack.push(value=char, line=line, col=col)
+                    curr_depth += 1
                 elif char in CLOSER_TO_OPENER:
+                    depth = max(depth, curr_depth)
+                    curr_depth -= 1
                     node = stack.pop()
                     opener = node.value if node is not None else None
                     if opener is None or CLOSER_TO_OPENER[char] != opener:
@@ -89,6 +101,7 @@ def check(content: str) -> CheckResult:
                                 OPENER_TO_CLOSER[opener] if opener is not None else None
                             ),
                         )
+                    pair_counts[opener] += 1
 
         col += 1
 
@@ -108,4 +121,4 @@ def check(content: str) -> CheckResult:
             expected=OPENER_TO_CLOSER[node.value],
         )
 
-    return CheckResult.success()
+    return CheckResult.success(depth=depth, counts=pair_counts)

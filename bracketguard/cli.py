@@ -6,7 +6,32 @@ import argparse
 import sys
 
 from . import __version__
-from .checker import ErrorKind, check
+from .checker import PAIRS, CheckResult, ErrorKind, check
+
+_STATS_MIN_WIDTH = 16
+
+
+def _print_stats(result: CheckResult) -> None:
+    rows = [("depth", str(result.depth))]
+    rows.extend(
+        (f"{opener}{closer}", str(result.counts.get(opener, 0)))
+        for opener, closer in PAIRS
+    )
+    inner = max(
+        _STATS_MIN_WIDTH,
+        len("Stats"),
+        max(len(label) + 2 + len(value) for label, value in rows),
+    )
+    rule = "─" * (inner + 2)
+
+    print()
+    print(f"╭{rule}╮")
+    print(f"│ {'Stats'.ljust(inner)} │")
+    print(f"├{rule}┤")
+    for label, value in rows:
+        gap = inner - len(label) - len(value)
+        print(f"│ {label}{' ' * gap}{value} │")
+    print(f"╰{rule}╯")
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
@@ -26,8 +51,13 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
     result = check(content)
 
+
     if result.ok:
         print("OK")
+
+        if args.stats:
+            _print_stats(result)
+
         return 0
 
     where = f"MISMATCH at line {result.line}, col {result.col}"
@@ -62,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
         "check", help="Check a file for balanced brackets, quotes, and tags."
     )
     check_parser.add_argument("file", nargs="+", help="Path to the file to check.")
+    check_parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print statistics about the checked file.",
+    )
     check_parser.set_defaults(func=_cmd_check, parser=check_parser)
 
     return parser
