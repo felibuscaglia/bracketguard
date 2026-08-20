@@ -14,6 +14,7 @@ class ErrorKind(str, Enum):
     UNEXPECTED_CLOSER = "unexpected_closer"
     UNCLOSED_OPENER = "unclosed_opener"
     UNTERMINATED_STRING = "unterminated_string"
+    MALFORMED_TAG = "malformed_tag"
 
 
 @dataclass(frozen=True)
@@ -26,14 +27,18 @@ class CheckResult:
     found: Optional[str] = None
     expected: Optional[str] = None
     counts: dict[str, int] = field(default_factory=dict)
+    tags: bool = False
 
     @classmethod
     def success(
-        cls, depth: int, counts: Optional[dict[str, int]] = None
+        cls,
+        depth: int = 0,
+        counts: Optional[dict[str, int]] = None,
+        tags: bool = False,
     ) -> "CheckResult":
         if counts is None:
             counts = {opener: 0 for opener, _ in PAIRS}
-        return cls(ok=True, depth=depth, counts=counts)
+        return cls(ok=True, depth=depth, counts=counts, tags=tags)
 
     @classmethod
     def failure(
@@ -43,10 +48,27 @@ class CheckResult:
         col: int,
         found: Optional[str] = None,
         expected: Optional[str] = None,
+        tags: bool = False,
     ) -> "CheckResult":
         return cls(
-            ok=False, kind=kind, line=line, col=col, found=found, expected=expected
+            ok=False,
+            kind=kind,
+            line=line,
+            col=col,
+            found=found,
+            expected=expected,
+            tags=tags,
         )
+
+
+def _leftmost_unclosed(stack: Stack):
+    """Return the earliest still-open stack node (bottom), or None."""
+    leftmost = None
+    node = stack.pop()
+    while node is not None:
+        leftmost = node
+        node = stack.pop()
+    return leftmost
 
 
 def check(content: str) -> CheckResult:
@@ -110,7 +132,7 @@ def check(content: str) -> CheckResult:
             ErrorKind.UNTERMINATED_STRING, quote_line, quote_col
         )
 
-    node = stack.pop()
+    node = _leftmost_unclosed(stack)
     if node is not None:
         opener_col, opener_line = node.position
         return CheckResult.failure(
@@ -122,3 +144,118 @@ def check(content: str) -> CheckResult:
         )
 
     return CheckResult.success(depth=depth, counts=pair_counts)
+
+
+def check_tags(content: str) -> CheckResult:
+    """Validate HTML/XML tag nesting (open / close / self-closing)."""
+    stack = Stack()
+    i = 0
+    line = 1
+    col = 1
+    n = len(content)
+
+    while i < n:
+        ch = content[i]
+        if ch == "\n":
+            line += 1
+            col = 1
+            i += 1
+            continue
+
+        if ch != "<":
+            col += 1
+            i += 1
+            continue
+
+        tag_line, tag_col = line, col
+        i += 1
+        col += 1
+
+        if i >= n:
+            return CheckResult.failure(
+                ErrorKind.MALFORMED_TAG, tag_line, tag_col, tags=True
+            )
+
+        is_close = False
+        if content[i] == "/":
+            is_close = True
+            i += 1
+            col += 1
+
+        name_chars: list[str] = []
+        while i < n and content[i].isalnum():
+            name_chars.append(content[i])
+            i += 1
+            col += 1
+        name = "".join(name_chars)
+
+        if not name:
+            return CheckResult.failure(
+                ErrorKind.MALFORMED_TAG, tag_line, tag_col, tags=True
+            )
+
+        rest_chars: list[str] = []
+        while i < n and content[i] != ">":
+            if content[i] == "\n":
+                rest_chars.append(content[i])
+                line += 1
+                col = 1
+                i += 1
+                continue
+            rest_chars.append(content[i])
+            i += 1
+            col += 1
+
+        if i >= n:
+            return CheckResult.failure(
+                ErrorKind.MALFORMED_TAG, tag_line, tag_col, tags=True
+            )
+
+        # Consume '>'.
+        i += 1
+        col += 1
+
+        rest = "".join(rest_chars)
+        if is_close:
+            if rest.strip():
+                return CheckResult.failure(
+                    ErrorKind.MALFORMED_TAG, tag_line, tag_col, tags=True
+                )
+            node = stack.pop()
+            opener = node.value if node is not None else None
+            found = f"</{name}>"
+            if opener is None:
+                return CheckResult.failure(
+                    ErrorKind.UNEXPECTED_CLOSER,
+                    tag_line,
+                    tag_col,
+                    found=found,
+                    tags=True,
+                )
+            if opener != name:
+                return CheckResult.failure(
+                    ErrorKind.UNEXPECTED_CLOSER,
+                    tag_line,
+                    tag_col,
+                    found=found,
+                    expected=f"</{opener}>",
+                    tags=True,
+                )
+            continue
+
+        self_closing = rest.rstrip().endswith("/")
+        if not self_closing:
+            stack.push(value=name, line=tag_line, col=tag_col)
+
+    node = _leftmost_unclosed(stack)
+    if node is not None:
+        opener_col, opener_line = node.position
+        return CheckResult.failure(
+            ErrorKind.UNCLOSED_OPENER,
+            opener_line,
+            opener_col,
+            found=f"<{node.value}>",
+            tags=True,
+        )
+
+    return CheckResult.success(tags=True)

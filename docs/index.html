@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>bracketguard — a fast, dependency-free bracket &amp; tag linter</title>
+<meta name="description" content="bracketguard is a zero-dependency Python CLI that verifies balanced brackets, quotes, and HTML/XML tags in a single O(n) pass — with precise line/column diagnostics." />
+<meta property="og:title" content="bracketguard" />
+<meta property="og:description" content="A fast, dependency-free CLI linter for balanced brackets, quotes, and HTML/XML tags — engineered with a hand-written stack and precise error locations." />
+<meta property="og:type" content="website" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<!-- Load fonts without ever blocking the load event; system fonts are a graceful fallback. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" /></noscript>
+
+<style>
+  :root{
+    --bg:#08090b;
+    --bg-2:#0d0f12;
+    --surface:#111318;
+    --surface-2:#161922;
+    --line:#20242e;
+    --line-2:#2b303c;
+    --text:#e9eaee;
+    --muted:#9aa0ac;
+    --faint:#646b7a;
+    --ok:#7ee787;
+    --err:#ff7b72;
+    --brand:#7ef0c2;
+    --brand-dim:#3ecf8e;
+    --amber:#e3b341;
+    --mono:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans:'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    --maxw:1080px;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none}
+  ::selection{background:rgba(126,240,194,.25);color:#fff}
+
+  /* ambient grid + glow */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(ellipse 80% 55% at 50% 0%,#000 30%,transparent 75%);
+  }
+  body::after{
+    content:"";position:fixed;top:-30%;left:50%;transform:translateX(-50%);
+    width:900px;height:600px;z-index:0;pointer-events:none;
+    background:radial-gradient(circle,rgba(62,207,142,.10),transparent 62%);
+    filter:blur(20px);
+  }
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:1}
+
+  /* ---------- NAV ---------- */
+  nav{
+    position:fixed;top:0;left:0;right:0;z-index:50;
+    backdrop-filter:blur(12px);
+    background:rgba(8,9,11,.55);
+    border-bottom:1px solid transparent;
+    transition:border-color .3s, background .3s;
+  }
+  nav.scrolled{border-bottom-color:var(--line);background:rgba(8,9,11,.8)}
+  .nav-inner{max-width:var(--maxw);margin:0 auto;padding:14px 24px;display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:700;letter-spacing:-.02em}
+  .brand .glyph{color:var(--brand)}
+  .nav-links{display:flex;align-items:center;gap:28px;font-size:14px}
+  .nav-links a{color:var(--muted);transition:color .2s}
+  .nav-links a:hover{color:var(--text)}
+  .nav-cta{
+    font-family:var(--mono);font-size:13px;color:var(--bg)!important;
+    background:var(--brand);padding:8px 14px;border-radius:8px;font-weight:700;
+    transition:transform .2s, box-shadow .2s;
+  }
+  .nav-cta:hover{transform:translateY(-1px);box-shadow:0 8px 24px -8px rgba(126,240,194,.6)}
+  @media(max-width:720px){.nav-links a:not(.nav-cta){display:none}}
+
+  /* ---------- HERO ---------- */
+  header.hero{padding:150px 0 90px;position:relative}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:12.5px;color:var(--brand);
+    border:1px solid var(--line-2);border-radius:999px;padding:6px 14px;
+    background:rgba(62,207,142,.05);margin-bottom:26px;
+  }
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  h1.title{
+    font-size:clamp(40px,7vw,76px);line-height:1.02;font-weight:800;
+    letter-spacing:-.04em;max-width:16ch;
+  }
+  h1.title .grad{
+    background:linear-gradient(120deg,var(--brand),#bdf5ff 55%,var(--ok));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .lede{margin-top:26px;font-size:clamp(17px,2.2vw,20px);color:var(--muted);max-width:56ch}
+  .lede b{color:var(--text);font-weight:600}
+  .hero-cta{margin-top:38px;display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+  .btn{
+    font-family:var(--mono);font-size:14px;font-weight:700;
+    padding:13px 20px;border-radius:10px;display:inline-flex;align-items:center;gap:9px;
+    transition:transform .2s,box-shadow .2s,background .2s,border-color .2s;cursor:pointer;
+  }
+  .btn-primary{background:var(--brand);color:var(--bg)}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 14px 34px -12px rgba(126,240,194,.65)}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--text);background:transparent}
+  .btn-ghost:hover{border-color:var(--brand);transform:translateY(-2px)}
+
+  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
+  @media(max-width:880px){.hero-grid{grid-template-columns:1fr;gap:40px}}
+
+  /* ---------- TERMINAL ---------- */
+  .terminal{
+    background:linear-gradient(180deg,var(--surface),#0c0e12);
+    border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    box-shadow:0 40px 80px -40px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.03);
+    font-family:var(--mono);
+  }
+  .term-bar{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+  .term-bar .tb{width:11px;height:11px;border-radius:50%}
+  .tb.r{background:#ff5f57}.tb.y{background:#febc2e}.tb.g{background:#28c840}
+  .term-title{margin-left:8px;font-size:12px;color:var(--faint)}
+  .term-body{padding:18px 18px 22px;font-size:13.5px;line-height:1.85;min-height:250px}
+  .term-body .ln{white-space:pre-wrap;word-break:break-word}
+  .prompt-sym{color:var(--brand-dim)}
+  .cmd{color:var(--text)}
+  .flag{color:var(--amber)}
+  .out-ok{color:var(--ok)}
+  .out-err{color:var(--err)}
+  .out-dim{color:var(--faint)}
+  .caret{display:inline-block;width:8px;height:16px;background:var(--brand);vertical-align:-3px;animation:blink 1s steps(2) infinite;margin-left:2px}
+  @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+
+  /* ---------- SECTIONS ---------- */
+  section{padding:88px 0;position:relative}
+  .sec-head{max-width:60ch;margin-bottom:52px}
+  .kicker{font-family:var(--mono);font-size:12.5px;color:var(--brand);text-transform:uppercase;letter-spacing:.14em;margin-bottom:14px}
+  h2{font-size:clamp(28px,4.4vw,42px);font-weight:800;letter-spacing:-.03em;line-height:1.08}
+  h2 + p{margin-top:16px;color:var(--muted);font-size:17px}
+
+  /* stats strip */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:8px}
+  @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{
+    border:1px solid var(--line);border-radius:12px;padding:22px 20px;background:var(--surface);
+    transition:transform .25s, border-color .25s;
+  }
+  .stat:hover{transform:translateY(-3px);border-color:var(--line-2)}
+  .stat .num{font-family:var(--mono);font-size:34px;font-weight:700;color:var(--brand);letter-spacing:-.03em}
+  .stat .lbl{color:var(--muted);font-size:13.5px;margin-top:6px}
+
+  /* feature grid */
+  .features{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  @media(max-width:880px){.features{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.features{grid-template-columns:1fr}}
+  .card{
+    position:relative;border:1px solid var(--line);border-radius:14px;padding:26px 24px;
+    background:linear-gradient(180deg,var(--surface),var(--bg-2));overflow:hidden;
+    transition:transform .28s cubic-bezier(.2,.7,.2,1), border-color .28s;
+  }
+  .card:hover{transform:translateY(-4px);border-color:var(--line-2)}
+  .card::after{content:"";position:absolute;inset:0;border-radius:14px;pointer-events:none;
+    background:radial-gradient(400px circle at var(--mx,50%) var(--my,0%),rgba(126,240,194,.08),transparent 40%);
+    opacity:0;transition:opacity .3s}
+  .card:hover::after{opacity:1}
+  .card .ico{font-family:var(--mono);font-size:20px;color:var(--brand);width:44px;height:44px;display:grid;place-items:center;
+    border:1px solid var(--line-2);border-radius:10px;background:var(--bg);margin-bottom:18px}
+  .card h3{font-size:17px;font-weight:700;letter-spacing:-.01em}
+  .card p{margin-top:9px;color:var(--muted);font-size:14.5px}
+  .card code{font-family:var(--mono);color:var(--brand);background:rgba(126,240,194,.08);padding:1px 6px;border-radius:5px;font-size:12.5px}
+
+  /* how it works / algorithm viz */
+  .algo{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
+  @media(max-width:880px){.algo{grid-template-columns:1fr;gap:32px}}
+  .algo-steps{display:flex;flex-direction:column;gap:14px}
+  .step{display:flex;gap:16px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);
+    transition:border-color .25s,background .25s}
+  .step.active{border-color:var(--brand);background:linear-gradient(90deg,rgba(126,240,194,.06),transparent)}
+  .step .n{font-family:var(--mono);color:var(--brand);font-weight:700;font-size:14px;min-width:24px}
+  .step h4{font-size:15px;font-weight:600}
+  .step p{font-size:13.5px;color:var(--muted);margin-top:3px}
+
+  .viz{
+    border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,var(--surface),#0b0d10);
+    padding:26px 24px 30px;font-family:var(--mono);position:relative;overflow:hidden;
+    box-shadow:0 40px 80px -50px rgba(0,0,0,.9);
+  }
+  .viz-label{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.14em;margin-bottom:18px}
+  .viz-scan{display:flex;gap:6px;margin-bottom:30px;flex-wrap:wrap}
+  .ch{width:34px;height:44px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--line-2);
+    font-size:20px;font-weight:700;color:var(--muted);background:var(--bg);transition:all .3s;position:relative}
+  .ch.cursor{border-color:var(--brand);color:var(--text);box-shadow:0 0 0 3px rgba(126,240,194,.14);transform:translateY(-4px)}
+  .ch.done{color:var(--faint);opacity:.45}
+  .ch.match{color:var(--ok);border-color:var(--ok)}
+  .viz-stackwrap{display:flex;align-items:flex-end;gap:24px}
+  .stack-col{flex:1;min-height:150px;display:flex;flex-direction:column-reverse;gap:6px;
+    border:1px dashed var(--line-2);border-radius:10px;padding:10px;background:rgba(255,255,255,.01)}
+  .stack-caption{font-size:11px;color:var(--faint);margin-bottom:8px;text-transform:uppercase;letter-spacing:.12em}
+  .tile{height:36px;display:grid;place-items:center;border-radius:7px;font-weight:700;font-size:16px;
+    background:rgba(126,240,194,.1);border:1px solid var(--brand-dim);color:var(--brand)}
+  .viz-status{margin-top:22px;font-size:13px;color:var(--muted);min-height:20px}
+  .viz-status .ok{color:var(--ok)}
+
+  /* architecture */
+  .arch{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  @media(max-width:880px){.arch{grid-template-columns:1fr}}
+  .mod{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface)}
+  .mod-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+  .mod-head .fn{font-family:var(--mono);font-size:13.5px;color:var(--brand)}
+  .mod-head .tag{font-size:11px;color:var(--faint);font-family:var(--mono)}
+  .mod-body{padding:18px}
+  .mod-body p{color:var(--muted);font-size:14px}
+  .mod-body ul{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .mod-body li{font-size:13px;color:var(--text);display:flex;gap:9px;align-items:flex-start}
+  .mod-body li::before{content:"▸";color:var(--brand);font-size:11px;margin-top:3px}
+
+  /* code block */
+  .code{
+    border:1px solid var(--line);border-radius:14px;overflow:hidden;font-family:var(--mono);
+    background:linear-gradient(180deg,var(--surface),#0b0d10);margin-top:26px;
+  }
+  .code-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .code-head .fname{font-size:12.5px;color:var(--faint)}
+  .code-head .lang{font-size:11px;color:var(--brand);border:1px solid var(--line-2);border-radius:6px;padding:2px 8px}
+  pre{padding:20px;overflow-x:auto;font-size:13px;line-height:1.75}
+  pre code{font-family:var(--mono)}
+  .t-kw{color:#ff7b72}.t-fn{color:#7ef0c2}.t-str{color:#a5d6ff}.t-cm{color:#5b6270;font-style:italic}
+  .t-cls{color:#ffa657}.t-num{color:#79c0ff}.t-self{color:#d2a8ff}
+
+  /* CLI reference */
+  .cli-tbl{border:1px solid var(--line);border-radius:14px;overflow:hidden;font-family:var(--mono);font-size:13.5px}
+  .cli-row{display:grid;grid-template-columns:minmax(160px,1fr) 2fr;gap:20px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .cli-row:last-child{border-bottom:none}
+  .cli-row:hover{background:rgba(255,255,255,.015)}
+  .cli-row .k{color:var(--brand)}
+  .cli-row .v{color:var(--muted)}
+  .cli-row .v b{color:var(--text);font-weight:500}
+  @media(max-width:560px){.cli-row{grid-template-columns:1fr;gap:6px}}
+
+  .exit-codes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}
+  @media(max-width:560px){.exit-codes{grid-template-columns:1fr}}
+  .exit{border:1px solid var(--line);border-radius:12px;padding:18px;background:var(--surface);font-family:var(--mono)}
+  .exit .code0{color:var(--ok)}.exit .code1{color:var(--err)}.exit .code2{color:var(--amber)}
+  .exit .big{font-size:26px;font-weight:700}
+  .exit .desc{font-family:var(--sans);color:var(--muted);font-size:13.5px;margin-top:6px}
+
+  /* samples */
+  .samples{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  @media(max-width:720px){.samples{grid-template-columns:1fr}}
+  .sample{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;font-family:var(--mono);font-size:13px}
+  .sample-in{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+  .sample-in .file{color:var(--faint);font-size:11px;min-width:78px}
+  .sample-in .content{color:var(--text)}
+  .sample-out{padding:12px 16px;font-size:12.5px}
+  .sample-out.ok{color:var(--ok)}
+  .sample-out.err{color:var(--err)}
+
+  /* recruiter / about */
+  .about{
+    border:1px solid var(--line-2);border-radius:20px;padding:48px 44px;
+    background:linear-gradient(135deg,rgba(62,207,142,.06),rgba(126,240,194,.02) 40%,transparent);
+    position:relative;overflow:hidden;
+  }
+  .about h2{max-width:20ch}
+  .about .pills{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 30px}
+  .pill{font-family:var(--mono);font-size:12.5px;color:var(--text);border:1px solid var(--line-2);
+    border-radius:999px;padding:7px 14px;background:rgba(255,255,255,.02)}
+  .pill b{color:var(--brand)}
+  .about-cta{display:flex;flex-wrap:wrap;gap:14px}
+
+  footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
+  .foot-inner{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;color:var(--faint);font-size:13px;font-family:var(--mono)}
+  .foot-inner a{color:var(--muted)}
+  .foot-inner a:hover{color:var(--brand)}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(24px)}
+
+  .divider{height:1px;background:linear-gradient(90deg,transparent,var(--line-2),transparent);margin:0 auto;max-width:var(--maxw)}
+
+  /* ---------- LIVE DEMO ---------- */
+  .demo-toolbar{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .seg{display:inline-flex;border:1px solid var(--line-2);border-radius:10px;overflow:hidden;font-family:var(--mono);font-size:13px}
+  .seg button{background:transparent;color:var(--muted);border:none;padding:9px 16px;cursor:pointer;transition:background .2s,color .2s}
+  .seg button.on{background:var(--brand);color:var(--bg);font-weight:700}
+  .presets{display:flex;flex-wrap:wrap;gap:8px}
+  .preset{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--surface);
+    border-radius:999px;padding:6px 12px;cursor:pointer;transition:border-color .2s,color .2s}
+  .preset:hover{border-color:var(--brand);color:var(--text)}
+  .demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:820px){.demo-grid{grid-template-columns:1fr}}
+  .editor-shell,.result-shell{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:linear-gradient(180deg,var(--surface),#0b0d10);display:flex;flex-direction:column}
+  .shell-head{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--faint)}
+  .shell-head .live{display:inline-flex;align-items:center;gap:7px;color:var(--brand)}
+  .shell-head .live .pulse{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+  #demoInput{
+    width:100%;min-height:240px;resize:vertical;border:none;outline:none;background:transparent;
+    color:var(--text);font-family:var(--mono);font-size:14px;line-height:1.85;padding:18px;tab-size:2;
+  }
+  #demoInput::placeholder{color:var(--faint)}
+  .result-body{padding:20px;font-family:var(--mono);font-size:14px;flex:1;display:flex;flex-direction:column;gap:16px}
+  .verdict{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:700}
+  .verdict .badge{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:20px}
+  .verdict.pass .badge{background:rgba(126,231,135,.14);color:var(--ok);border:1px solid var(--ok)}
+  .verdict.fail .badge{background:rgba(255,123,114,.12);color:var(--err);border:1px solid var(--err)}
+  .verdict.pass{color:var(--ok)}.verdict.fail{color:var(--err)}
+  .result-msg{font-size:13.5px;color:var(--muted);line-height:1.7}
+  .result-msg .hl{color:var(--text)}
+  .result-meta{margin-top:auto;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-wrap:wrap;gap:10px}
+  .chip{font-size:12px;color:var(--muted);border:1px solid var(--line-2);border-radius:8px;padding:6px 11px;background:var(--bg)}
+  .chip b{color:var(--brand)}
+  .exitline{font-size:12px;color:var(--faint)}
+  .exitline b.c0{color:var(--ok)}.exitline b.c1{color:var(--err)}
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top"><span class="glyph">{ }</span> bracketguard</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#cli">CLI</a>
+      <a class="nav-cta" href="https://github.com/felibuscaglia/bracketguard" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow" id="eyebrow"><span class="dot"></span> v0.1.0 · zero dependencies · Python 3.9+</span>
+        <h1 class="title" id="heroTitle">Never ship an <span class="grad">unbalanced bracket</span> again.</h1>
+        <p class="lede" id="heroLede">
+          <b>bracketguard</b> is a fast, dependency-free command-line linter that verifies balanced
+          brackets, quotes, and HTML/XML tags in a single <b>O(n)</b> pass — pointing you to the exact
+          <b>line and column</b> the moment something is off.
+        </p>
+        <div class="hero-cta" id="heroCta">
+          <a class="btn btn-primary" href="https://github.com/felibuscaglia/bracketguard" target="_blank" rel="noopener">
+            ★ View on GitHub
+          </a>
+          <a class="btn btn-ghost" href="#how">See how it works →</a>
+        </div>
+      </div>
+
+      <div class="terminal" id="terminal">
+        <div class="term-bar">
+          <span class="tb r"></span><span class="tb y"></span><span class="tb g"></span>
+          <span class="term-title">— bracketguard — zsh</span>
+        </div>
+        <div class="term-body" id="termBody"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ STATS ============ -->
+<section style="padding-top:20px" id="stats-sec">
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat reveal"><div class="num" data-count="0">0</div><div class="lbl">runtime dependencies</div></div>
+      <div class="stat reveal"><div class="num">O(n)</div><div class="lbl">single-pass scan</div></div>
+      <div class="stat reveal"><div class="num" data-count="4">0</div><div class="lbl">distinct error kinds</div></div>
+      <div class="stat reveal"><div class="num" data-count="3">0</div><div class="lbl">focused modules</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Capabilities</div>
+      <h2>Everything it checks — nothing it doesn't need.</h2>
+      <p>A tight feature set, each one built to catch a real class of syntax bug with a precise, human-readable diagnostic.</p>
+    </div>
+    <div class="features" id="featureGrid">
+      <div class="card reveal">
+        <div class="ico">( )</div>
+        <h3>Balanced brackets</h3>
+        <p>Validates <code>()</code>, <code>[]</code> and <code>{}</code> nesting with a stack — catching every mismatch, wrong-type close, and leftover opener.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">" "</div>
+        <h3>String awareness</h3>
+        <p>Brackets inside <code>"double-quoted"</code> strings are ignored, and escaped quotes <code>\"</code> are handled correctly.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico"># _</div>
+        <h3>Comment awareness</h3>
+        <p>Everything after a <code>#</code> to end-of-line is skipped, so commented-out brackets never trigger false positives.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">⌖</div>
+        <h3>Precise error locations</h3>
+        <p>Every failure reports an exact <code>line</code> and <code>col</code>, and points to the <b>leftmost unclosed opener</b> rather than the end of file.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">→ )</div>
+        <h3>Expected-closer hints</h3>
+        <p>Mismatches tell you what was expected: <code>expected ')' but found ']'</code> — no guessing which bracket you actually meant.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">&lt;/&gt;</div>
+        <h3>HTML / XML tags</h3>
+        <p>The <code>--tags</code> mode validates open, close and self-closing tag nesting, catching malformed tags and crossed elements.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">📊</div>
+        <h3>Structure stats</h3>
+        <p><code>--stats</code> reports maximum nesting <b>depth</b> and per-type pair counts for any balanced file at a glance.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">⏻</div>
+        <h3>Scriptable exit codes</h3>
+        <p>Returns <code>0</code> / <code>1</code> / <code>2</code> for pass / mismatch / file-error, so it drops straight into CI pipelines and git hooks.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ico">∅</div>
+        <h3>Pure standard library</h3>
+        <p>No third-party packages. Just Python ≥ 3.9 and the stdlib — install in seconds, audit in minutes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">The algorithm</div>
+      <h2>One pass. One stack. Exact answers.</h2>
+      <p>bracketguard reads the file a single character at a time, pushing openers onto a hand-written stack and matching each closer against the top. Watch it run:</p>
+    </div>
+
+    <div class="algo">
+      <div class="algo-steps" id="algoSteps">
+        <div class="step" data-step="0"><span class="n">01</span><div><h4>Scan left to right</h4><p>Iterate every character once — tracking line &amp; column as it goes.</p></div></div>
+        <div class="step" data-step="1"><span class="n">02</span><div><h4>Push each opener</h4><p>An opener is placed on the stack together with its exact position.</p></div></div>
+        <div class="step" data-step="2"><span class="n">03</span><div><h4>Match each closer</h4><p>Pop the top and confirm it's the correct partner — or fail with a precise diagnostic.</p></div></div>
+        <div class="step" data-step="3"><span class="n">04</span><div><h4>Verify an empty stack</h4><p>Anything still on the stack at EOF is an unclosed opener, reported at its origin.</p></div></div>
+      </div>
+
+      <div class="viz" id="viz">
+        <div class="viz-label">live · matching <span style="color:var(--brand)">([{}])</span></div>
+        <div class="viz-scan" id="vizScan"></div>
+        <div class="viz-stackwrap">
+          <div style="flex:1">
+            <div class="stack-caption">the stack (top → bottom)</div>
+            <div class="stack-col" id="stackCol"></div>
+          </div>
+        </div>
+        <div class="viz-status" id="vizStatus">Ready.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ LIVE DEMO ============ -->
+<section id="demo">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Try it live</div>
+      <h2>Run bracketguard right here.</h2>
+      <p>This playground runs a faithful port of the actual checker in your browser — same single-pass logic, same diagnostics, same exit codes. Type below and watch it react.</p>
+    </div>
+
+    <div class="reveal">
+      <div class="demo-toolbar">
+        <div class="seg" id="demoMode">
+          <button class="on" data-mode="brackets">brackets</button>
+          <button data-mode="tags">&lt;/&gt; tags</button>
+        </div>
+        <div class="presets" id="demoPresets">
+          <button class="preset" data-p="balanced">balanced</button>
+          <button class="preset" data-p="mismatch">wrong closer</button>
+          <button class="preset" data-p="unclosed">unclosed</button>
+          <button class="preset" data-p="string">string trap</button>
+          <button class="preset" data-p="comment">comment</button>
+          <button class="preset" data-p="html">html</button>
+        </div>
+      </div>
+
+      <div class="demo-grid">
+        <div class="editor-shell">
+          <div class="shell-head"><span id="demoFilename">input.txt</span><span>editable</span></div>
+          <textarea id="demoInput" spellcheck="false" autocapitalize="off" autocomplete="off">foo("bar", [1, 2, {"k": 3}])  # perfectly balanced</textarea>
+        </div>
+        <div class="result-shell">
+          <div class="shell-head"><span>output</span><span class="live"><span class="pulse"></span>live</span></div>
+          <div class="result-body">
+            <div class="verdict" id="demoVerdict"><span class="badge">✓</span><span id="demoVerdictText">OK</span></div>
+            <div class="result-msg" id="demoMsg"></div>
+            <div class="result-meta" id="demoMeta"></div>
+          </div>
+        </div>
+      </div>
+      <p class="exitline" style="margin-top:14px;font-family:var(--mono)">$ echo $? → <b class="c0" id="demoExit">0</b></p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="architecture">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Under the hood</div>
+      <h2>Clean, layered, and readable by design.</h2>
+      <p>Three small modules with a single responsibility each — the kind of separation that keeps a codebase testable and honest as it grows.</p>
+    </div>
+
+    <div class="arch">
+      <div class="mod reveal">
+        <div class="mod-head"><span class="fn">stack.py</span><span class="tag">data structure</span></div>
+        <div class="mod-body">
+          <p>A singly-linked-list <b>Stack</b>, written from scratch — no <code style="font-family:var(--mono);color:var(--brand)">list</code> shortcuts.</p>
+          <ul>
+            <li>Each <b>Node</b> stores a value and its <code style="font-family:var(--mono);color:var(--brand)">(col, line)</code> position</li>
+            <li>O(1) <b>push</b> / <b>pop</b> / <b>is_empty</b></li>
+            <li>Positions travel with the data for exact diagnostics</li>
+          </ul>
+        </div>
+      </div>
+      <div class="mod reveal">
+        <div class="mod-head"><span class="fn">checker.py</span><span class="tag">core engine</span></div>
+        <div class="mod-body">
+          <p>The scanning logic and result model, fully decoupled from I/O.</p>
+          <ul>
+            <li>Frozen <b>CheckResult</b> dataclass — immutable outcomes</li>
+            <li><b>ErrorKind</b> enum: 4 well-named failure modes</li>
+            <li>Two engines: <code style="font-family:var(--mono);color:var(--brand)">check()</code> &amp; <code style="font-family:var(--mono);color:var(--brand)">check_tags()</code></li>
+          </ul>
+        </div>
+      </div>
+      <div class="mod reveal">
+        <div class="mod-head"><span class="fn">cli.py</span><span class="tag">interface</span></div>
+        <div class="mod-body">
+          <p>A thin argparse layer that formats results for humans.</p>
+          <ul>
+            <li><code style="font-family:var(--mono);color:var(--brand)">check</code> subcommand with <code style="font-family:var(--mono);color:var(--brand)">--stats</code> / <code style="font-family:var(--mono);color:var(--brand)">--tags</code></li>
+            <li>Message formatting isolated from detection</li>
+            <li>Installed as a real console script entry point</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="code reveal">
+      <div class="code-head"><span class="fname">bracketguard/checker.py — the matching core</span><span class="lang">python</span></div>
+<pre><code><span class="t-kw">for</span> index, char <span class="t-kw">in</span> <span class="t-fn">enumerate</span>(content):
+    <span class="t-cm"># ... newline / string / comment handling omitted ...</span>
+    <span class="t-kw">elif</span> char <span class="t-kw">in</span> OPENER_TO_CLOSER:
+        stack.<span class="t-fn">push</span>(value=char, line=line, col=col)   <span class="t-cm"># remember where it opened</span>
+        curr_depth += <span class="t-num">1</span>
+    <span class="t-kw">elif</span> char <span class="t-kw">in</span> CLOSER_TO_OPENER:
+        node = stack.<span class="t-fn">pop</span>()
+        opener = node.value <span class="t-kw">if</span> node <span class="t-kw">is not</span> <span class="t-self">None</span> <span class="t-kw">else</span> <span class="t-self">None</span>
+        <span class="t-kw">if</span> opener <span class="t-kw">is</span> <span class="t-self">None</span> <span class="t-kw">or</span> CLOSER_TO_OPENER[char] != opener:
+            <span class="t-kw">return</span> CheckResult.<span class="t-fn">failure</span>(
+                ErrorKind.UNEXPECTED_CLOSER, line, col,
+                found=char,
+                expected=OPENER_TO_CLOSER[opener] <span class="t-kw">if</span> opener <span class="t-kw">else</span> <span class="t-self">None</span>,
+            )
+        pair_counts[opener] += <span class="t-num">1</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ CLI REFERENCE ============ -->
+<section id="cli">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Reference</div>
+      <h2>A CLI that reads like plain English.</h2>
+      <p>One command, three flags, and predictable exit codes designed for automation.</p>
+    </div>
+
+    <div class="cli-tbl reveal">
+      <div class="cli-row"><span class="k">bracketguard check FILE</span><span class="v">Check a file for balanced brackets, quotes and tags.</span></div>
+      <div class="cli-row"><span class="k">&nbsp;&nbsp;--stats</span><span class="v">On success, print nesting <b>depth</b> and per-type pair counts.</span></div>
+      <div class="cli-row"><span class="k">&nbsp;&nbsp;--tags</span><span class="v">Validate <b>HTML/XML tag</b> nesting instead of brackets.</span></div>
+      <div class="cli-row"><span class="k">--version</span><span class="v">Print the installed version and exit.</span></div>
+    </div>
+
+    <div class="exit-codes reveal">
+      <div class="exit"><div class="big code0">0</div><div class="desc"><b style="color:var(--ok)">Balanced.</b> The file passed every check.</div></div>
+      <div class="exit"><div class="big code1">1</div><div class="desc"><b style="color:var(--err)">Mismatch.</b> A precise diagnostic was printed.</div></div>
+      <div class="exit"><div class="big code2">2</div><div class="desc"><b style="color:var(--amber)">File error.</b> The target couldn't be opened.</div></div>
+    </div>
+
+    <div class="code reveal">
+      <div class="code-head"><span class="fname">install &amp; run</span><span class="lang">shell</span></div>
+<pre><code><span class="t-cm"># install straight from the repo (zero third-party deps)</span>
+<span class="t-fn">pip</span> install git+https://github.com/felibuscaglia/bracketguard.git
+
+<span class="t-cm"># check a source file</span>
+<span class="t-fn">bracketguard</span> check main.py
+<span class="t-str">OK</span>
+
+<span class="t-cm"># inspect structure of a balanced file</span>
+<span class="t-fn">bracketguard</span> check config.txt <span class="t-cls">--stats</span>
+<span class="t-str">OK</span>
+<span class="t-str">depth: 3</span>
+<span class="t-str">pairs: () = 2, [] = 2, {} = 2</span>
+
+<span class="t-cm"># validate markup nesting</span>
+<span class="t-fn">bracketguard</span> check page.html <span class="t-cls">--tags</span>
+<span class="t-err">MISMATCH at line 1, col 11: expected &lt;/p&gt; but found &lt;/div&gt;</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ SAMPLES ============ -->
+<section id="samples">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Edge cases</div>
+      <h2>Battle-tested against the tricky ones.</h2>
+      <p>Real fixtures from the repo — the cases that separate a toy from a tool: strings, comments, escapes and their interactions.</p>
+    </div>
+    <div class="samples" id="sampleGrid">
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-1</span><span class="content">([{}])</span></div><div class="sample-out ok">OK · perfectly nested</div></div>
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-5</span><span class="content">"((("</span></div><div class="sample-out ok">OK · brackets inside a string are ignored</div></div>
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-6</span><span class="content">a # (</span></div><div class="sample-out ok">OK · the '(' lives in a comment</div></div>
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-9</span><span class="content">"a\"b("</span></div><div class="sample-out ok">OK · escaped quote keeps the string open</div></div>
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-7</span><span class="content">"#" ]</span></div><div class="sample-out err">MISMATCH col 5 · unexpected ']'</div></div>
+      <div class="sample reveal"><div class="sample-in"><span class="file">sample-10</span><span class="content">foo("bar)</span></div><div class="sample-out err">MISMATCH col 5 · unterminated string</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ ABOUT / RECRUITER ============ -->
+<section id="about">
+  <div class="wrap">
+    <div class="about reveal">
+      <div class="kicker">The engineering</div>
+      <h2>Small project. Senior-level fundamentals.</h2>
+      <p style="color:var(--muted);font-size:17px;max-width:60ch;margin-top:16px">
+        bracketguard is a deliberate study in doing the simple thing well: a classic
+        stack problem, implemented from first principles, with the production hygiene of a
+        shippable tool. It's what careful engineering looks like at a readable scale.
+      </p>
+      <div class="pills">
+        <span class="pill"><b>✓</b> Data structures from scratch</span>
+        <span class="pill"><b>✓</b> O(n) single-pass design</span>
+        <span class="pill"><b>✓</b> Immutable result modeling</span>
+        <span class="pill"><b>✓</b> Separation of concerns</span>
+        <span class="pill"><b>✓</b> Thoughtful edge-case handling</span>
+        <span class="pill"><b>✓</b> Zero-dependency footprint</span>
+        <span class="pill"><b>✓</b> CI-friendly exit codes</span>
+        <span class="pill"><b>✓</b> Packaged &amp; installable</span>
+      </div>
+      <div class="about-cta">
+        <a class="btn btn-primary" href="https://github.com/felibuscaglia/bracketguard" target="_blank" rel="noopener">Read the source ↗</a>
+        <a class="btn btn-ghost" href="mailto:felipebbuscaglia@gmail.com">Get in touch →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-inner">
+      <span>{ } bracketguard · v0.1.0 · built by Felipe Buscaglia</span>
+      <span>
+        <a href="https://github.com/felibuscaglia/bracketguard" target="_blank" rel="noopener">GitHub</a> ·
+        <a href="mailto:felipebbuscaglia@gmail.com">felipebbuscaglia@gmail.com</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+<!-- libraries — vendored locally so the site is fully self-contained (no runtime CDN dependency) -->
+<script src="./vendor/anime.min.js"></script>
+<script src="./vendor/motion.min.js"></script>
+
+<script>
+(function(){
+  "use strict";
+  var anime = window.anime;
+  var Motion = window.Motion;
+
+  /* ---------- NAV shadow ---------- */
+  var nav = document.getElementById('nav');
+  window.addEventListener('scroll', function(){
+    if(window.scrollY > 12) nav.classList.add('scrolled'); else nav.classList.remove('scrolled');
+  }, {passive:true});
+
+  /* ---------- HERO intro (anime.js) ---------- */
+  var HERO_IDS = ['eyebrow','heroTitle','heroLede','heroCta','terminal'];
+  function showHero(){
+    HERO_IDS.forEach(function(id){
+      var el=document.getElementById(id); if(el){ el.style.opacity=1; el.style.transform='none'; }
+    });
+  }
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(anime && !reduceMotion){
+    anime.timeline({easing:'easeOutExpo'})
+      .add({targets:'#eyebrow',opacity:[0,1],translateY:[12,0],duration:700})
+      .add({targets:'#heroTitle',opacity:[0,1],translateY:[20,0],duration:900},'-=450')
+      .add({targets:'#heroLede',opacity:[0,1],translateY:[16,0],duration:800},'-=600')
+      .add({targets:'#heroCta',opacity:[0,1],translateY:[16,0],duration:700},'-=550')
+      .add({targets:'#terminal',opacity:[0,1],translateY:[30,0],scale:[.98,1],duration:900},'-=750');
+    // Failsafe: rAF-driven intros don't run in a background tab — guarantee the
+    // hero is visible regardless (setTimeout fires even when rAF is throttled).
+    setTimeout(showHero, 2800);
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) showHero(); });
+  } else {
+    showHero();
+  }
+
+  /* ---------- Terminal typewriter ---------- */
+  var termBody = document.getElementById('termBody');
+  var script = [
+    {t:'cmd', pre:'$ ', html:'bracketguard check server.py'},
+    {t:'out', cls:'out-ok', html:'OK'},
+    {t:'gap'},
+    {t:'cmd', pre:'$ ', html:'bracketguard check styles.css <span class="flag">--stats</span>'},
+    {t:'out', cls:'out-ok', html:'OK'},
+    {t:'out', cls:'out-dim', html:'depth: 3'},
+    {t:'out', cls:'out-dim', html:'pairs: () = 2, [] = 2, {} = 2'},
+    {t:'gap'},
+    {t:'cmd', pre:'$ ', html:'bracketguard check payload.json'},
+    {t:'out', cls:'out-err', html:"MISMATCH at line 4, col 12: expected '}' but found ']'"},
+    {t:'gap'},
+    {t:'cmd', pre:'$ ', html:'bracketguard check index.html <span class="flag">--tags</span>'},
+    {t:'out', cls:'out-err', html:'MISMATCH at line 1, col 11: expected &lt;/p&gt; but found &lt;/div&gt;'}
+  ];
+
+  function el(cls){ var d=document.createElement('div'); d.className='ln'; if(cls) d.classList.add(cls); return d; }
+
+  function typeLine(node, html, speed, done){
+    // type raw text but preserve inner spans by parsing tokens
+    var tmp=document.createElement('span'); tmp.innerHTML=html;
+    var full=tmp.textContent; var i=0;
+    var caret=document.createElement('span'); caret.className='caret';
+    node.appendChild(caret);
+    var iv=setInterval(function(){
+      i++;
+      // rebuild partial text before caret
+      node.textContent=full.slice(0,i);
+      node.appendChild(caret);
+      if(i>=full.length){
+        clearInterval(iv);
+        node.innerHTML=html; // restore rich formatting
+        done && done();
+      }
+    }, speed);
+  }
+
+  function runTerminal(idx){
+    if(idx>=script.length){
+      // loop after a pause
+      setTimeout(function(){ termBody.innerHTML=''; runTerminal(0); }, 4200);
+      return;
+    }
+    var s=script[idx];
+    if(s.t==='gap'){
+      var g=el(); g.innerHTML='&nbsp;'; termBody.appendChild(g); runTerminal(idx+1); return;
+    }
+    if(s.t==='cmd'){
+      var line=el();
+      var pre=document.createElement('span'); pre.className='prompt-sym'; pre.textContent=s.pre; line.appendChild(pre);
+      var body=document.createElement('span'); body.className='cmd'; line.appendChild(body);
+      termBody.appendChild(line);
+      typeLine(body, s.html, 34, function(){ setTimeout(function(){ runTerminal(idx+1); }, 380); });
+    } else {
+      var o=el(s.cls); o.innerHTML=s.html; termBody.appendChild(o);
+      setTimeout(function(){ runTerminal(idx+1); }, 460);
+    }
+  }
+  setTimeout(function(){ runTerminal(0); }, 1400);
+
+  /* ---------- Scroll reveals (motion.dev) — one-shot, never re-toggle ---------- */
+  function revealNow(node){ node.style.opacity=1; node.style.transform='none'; }
+  var reveals = document.querySelectorAll('.reveal');
+  if(Motion && Motion.inView && Motion.animate && !reduceMotion){
+    reveals.forEach(function(node){
+      var stop = Motion.inView(node, function(){
+        Motion.animate(node, {opacity:[0,1], transform:['translateY(24px)','translateY(0px)']},
+          {duration:.7, easing:[.2,.7,.2,1]});
+        if(stop) stop();            // detach observer so it fires only once
+        return function(){};
+      }, {margin:'-10% 0px -10% 0px'});
+    });
+  } else {
+    reveals.forEach(revealNow);
+  }
+
+  /* ---------- Stagger feature cards — one-shot ---------- */
+  if(Motion && Motion.inView && Motion.animate && Motion.stagger){
+    var stopGrid = Motion.inView('#featureGrid', function(){
+      Motion.animate('#featureGrid .card',
+        {opacity:[0,1], transform:['translateY(28px) scale(.98)','translateY(0) scale(1)']},
+        {delay:Motion.stagger(.06), duration:.6, easing:[.2,.7,.2,1]});
+      if(stopGrid) stopGrid();
+      return function(){};
+    }, {margin:'-8% 0px'});
+  }
+
+  /* ---------- Card pointer glow ---------- */
+  document.querySelectorAll('.card').forEach(function(card){
+    card.addEventListener('pointermove', function(e){
+      var r=card.getBoundingClientRect();
+      card.style.setProperty('--mx',(e.clientX-r.left)+'px');
+      card.style.setProperty('--my',(e.clientY-r.top)+'px');
+    });
+  });
+
+  /* ---------- Count-up stats ---------- */
+  document.querySelectorAll('.num[data-count]').forEach(function(node){
+    var target=parseInt(node.getAttribute('data-count'),10);
+    if(Motion && Motion.inView){
+      var stopN = Motion.inView(node, function(){
+        var start=0, dur=900, t0=null;
+        function frame(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/dur,1);
+          node.textContent=Math.round(start+(target-start)*(1-Math.pow(1-p,3)));
+          if(p<1) requestAnimationFrame(frame); }
+        requestAnimationFrame(frame);
+        if(stopN) stopN();          // count up only once
+        return function(){};
+      }, {margin:'-10% 0px'});
+    } else { node.textContent=target; }
+  });
+
+  /* ---------- Algorithm visualization (anime.js) ---------- */
+  var SEQ = '([{}])';
+  // action per index: 'push' opener or 'pop' closer, and match target index
+  var pairsMap = {')':'(', ']':'[', '}':'{'};
+  var scanEl = document.getElementById('vizScan');
+  var stackEl = document.getElementById('stackCol');
+  var statusEl = document.getElementById('vizStatus');
+  var steps = document.querySelectorAll('#algoSteps .step');
+  var chEls = [];
+  SEQ.split('').forEach(function(c){
+    var d=document.createElement('div'); d.className='ch'; d.textContent=c; scanEl.appendChild(d); chEls.push(d);
+  });
+
+  function setStep(k){ steps.forEach(function(s){ s.classList.toggle('active', +s.dataset.step===k); }); }
+
+  function addTile(ch){
+    var t=document.createElement('div'); t.className='tile'; t.textContent=ch; stackEl.appendChild(t);
+    if(anime) anime({targets:t, opacity:[0,1], translateY:[-14,0], scale:[.8,1], duration:340, easing:'easeOutBack'});
+    return t;
+  }
+  function popTile(){
+    var tiles=stackEl.children; if(!tiles.length) return;
+    var t=tiles[tiles.length-1];
+    if(anime){ anime({targets:t, opacity:[1,0], translateY:[0,-16], scale:[1,.7], duration:300, easing:'easeInQuad',
+      complete:function(){ if(t.parentNode) t.parentNode.removeChild(t); }}); }
+    else { t.parentNode.removeChild(t); }
+  }
+
+  function resetViz(){
+    chEls.forEach(function(c){ c.className='ch'; });
+    stackEl.innerHTML=''; statusEl.innerHTML='Scanning…';
+  }
+
+  function runViz(){
+    resetViz();
+    var i=0;
+    function tick(){
+      if(i>0) chEls[i-1].classList.remove('cursor');
+      if(i>=SEQ.length){
+        setStep(3);
+        statusEl.innerHTML='<span class="ok">✓ Stack empty at EOF — perfectly balanced.</span>';
+        setTimeout(runViz, 2600);
+        return;
+      }
+      var c=SEQ[i];
+      chEls[i].classList.add('cursor');
+      if(pairsMap[c]){ // closer
+        setStep(2);
+        chEls[i].classList.add('match');
+        popTile();
+        statusEl.innerHTML="pop → matched <span style='color:var(--ok)'>"+c+"</span>";
+      } else { // opener
+        setStep(1);
+        addTile(c);
+        statusEl.innerHTML="push <span style='color:var(--brand)'>"+c+"</span> onto the stack";
+      }
+      setTimeout(function(){ chEls[i].classList.remove('cursor'); chEls[i].classList.add('done'); i++; tick(); }, 780);
+    }
+    setStep(0);
+    setTimeout(tick, 500);
+  }
+
+  if(Motion && Motion.inView){
+    var started=false;
+    Motion.inView('#viz', function(){ if(!started){ started=true; runViz(); } return function(){}; }, {margin:'-15% 0px'});
+  } else {
+    runViz();
+  }
+
+  /* ============================================================
+     LIVE DEMO — faithful in-browser ports of the Python checker
+     (bracketguard/checker.py :: check() and check_tags())
+  ============================================================ */
+  var OPENER_TO_CLOSER = {'(':')','[':']','{':'}'};
+  var CLOSER_TO_OPENER = {')':'(',']':'[','}':'{'};
+
+  function bottomOf(st){ return st.length ? st[0] : null; } // == _leftmost_unclosed
+
+  // Port of check()
+  function checkBrackets(content){
+    var stack=[], line=1, col=1, qLine=null, qCol=null, qOpen=false, isComment=false;
+    var depth=0, cur=0, counts={'(':0,'[':0,'{':0};
+    for(var idx=0; idx<content.length; idx++){
+      var ch=content[idx];
+      if(ch==='\n'){
+        if(qOpen) return {ok:false,kind:'unterminated_string',line:qLine,col:qCol};
+        isComment=false; line++; col=1; continue;
+      }
+      if(!isComment){
+        if(ch==='"'){
+          var escaped = idx>0 && content[idx-1]==='\\';
+          if(qOpen && !escaped) qOpen=false;
+          else if(!qOpen){ qOpen=true; qLine=line; qCol=col; }
+        } else if(!qOpen){
+          if(ch==='#'){ isComment=true; }
+          else if(OPENER_TO_CLOSER[ch]!==undefined){ stack.push({value:ch,line:line,col:col}); cur++; }
+          else if(CLOSER_TO_OPENER[ch]!==undefined){
+            depth=Math.max(depth,cur); cur--;
+            var node=stack.pop()||null;
+            var opener=node?node.value:null;
+            if(opener===null || CLOSER_TO_OPENER[ch]!==opener){
+              return {ok:false,kind:'unexpected_closer',line:line,col:col,found:ch,
+                expected: opener!==null?OPENER_TO_CLOSER[opener]:null};
+            }
+            counts[opener]++;
+          }
+        }
+      }
+      col++;
+    }
+    if(qOpen) return {ok:false,kind:'unterminated_string',line:qLine,col:qCol};
+    var rem=bottomOf(stack);
+    if(rem) return {ok:false,kind:'unclosed_opener',line:rem.line,col:rem.col,
+      found:rem.value,expected:OPENER_TO_CLOSER[rem.value]};
+    return {ok:true,depth:depth,counts:counts};
+  }
+
+  // Port of check_tags()
+  function checkTags(content){
+    var stack=[], i=0, line=1, col=1, n=content.length;
+    while(i<n){
+      var ch=content[i];
+      if(ch==='\n'){ line++; col=1; i++; continue; }
+      if(ch!=='<'){ col++; i++; continue; }
+      var tLine=line, tCol=col; i++; col++;
+      if(i>=n) return {ok:false,kind:'malformed_tag',line:tLine,col:tCol,tags:true};
+      var isClose=false;
+      if(content[i]==='/'){ isClose=true; i++; col++; }
+      var name='';
+      while(i<n && /[a-zA-Z0-9]/.test(content[i])){ name+=content[i]; i++; col++; }
+      if(!name) return {ok:false,kind:'malformed_tag',line:tLine,col:tCol,tags:true};
+      var rest='';
+      while(i<n && content[i]!=='>'){
+        if(content[i]==='\n'){ rest+='\n'; line++; col=1; i++; continue; }
+        rest+=content[i]; i++; col++;
+      }
+      if(i>=n) return {ok:false,kind:'malformed_tag',line:tLine,col:tCol,tags:true};
+      i++; col++; // consume '>'
+      if(isClose){
+        if(rest.trim()) return {ok:false,kind:'malformed_tag',line:tLine,col:tCol,tags:true};
+        var node=stack.pop()||null;
+        var opener=node?node.value:null;
+        var found='</'+name+'>';
+        if(opener===null) return {ok:false,kind:'unexpected_closer',line:tLine,col:tCol,found:found,tags:true};
+        if(opener!==name) return {ok:false,kind:'unexpected_closer',line:tLine,col:tCol,found:found,expected:'</'+opener+'>',tags:true};
+        continue;
+      }
+      var selfClosing = rest.replace(/\s+$/,'').slice(-1)==='/';
+      if(!selfClosing) stack.push({value:name,line:tLine,col:tCol});
+    }
+    var rem=bottomOf(stack);
+    if(rem) return {ok:false,kind:'unclosed_opener',line:rem.line,col:rem.col,found:'<'+rem.value+'>',tags:true};
+    return {ok:true,tags:true};
+  }
+
+  // Port of cli._format_mismatch()
+  function formatMismatch(r){
+    var where='MISMATCH at line '+r.line+', col '+r.col;
+    if(r.kind==='malformed_tag') return where+': malformed tag';
+    if(r.kind==='unterminated_string') return where+': unterminated string';
+    if(r.tags){
+      if(r.kind==='unclosed_opener') return where+': unclosed '+r.found;
+      if(r.expected==null) return where+': unexpected '+r.found;
+      return where+': expected '+r.expected+' but found '+r.found;
+    }
+    if(r.kind==='unclosed_opener') return where+": unclosed '"+r.found+"'";
+    if(r.expected==null) return where+": unexpected '"+r.found+"'";
+    return where+": expected '"+r.expected+"' but found '"+r.found+"'";
+  }
+
+  var PRESETS = {
+    balanced: {mode:'brackets', text:'foo("bar", [1, 2, {"k": 3}])  # perfectly balanced'},
+    mismatch: {mode:'brackets', text:'def f():\n    return (a[0] + b)]'},
+    unclosed: {mode:'brackets', text:'open = {\n    "a": [1, 2],\n    "b": 3\n'},
+    string:   {mode:'brackets', text:'msg = "an ) inside a string is ignored"\nprint(msg)'},
+    comment:  {mode:'brackets', text:'x = 1  # a stray ( in a comment never counts\ny = (x + 2)'},
+    html:     {mode:'tags',     text:'<section>\n  <p>hello <b>world</b></p>\n  <img src="x" />\n</section>'}
+  };
+
+  var input=document.getElementById('demoInput');
+  var modeSeg=document.getElementById('demoMode');
+  var verdict=document.getElementById('demoVerdict');
+  var verdictText=document.getElementById('demoVerdictText');
+  var msg=document.getElementById('demoMsg');
+  var meta=document.getElementById('demoMeta');
+  var exitEl=document.getElementById('demoExit');
+  var fnameEl=document.getElementById('demoFilename');
+  var demoMode='brackets';
+
+  function runDemo(){
+    var content=input.value;
+    var r = demoMode==='tags' ? checkTags(content) : checkBrackets(content);
+    if(r.ok){
+      verdict.className='verdict pass';
+      verdict.querySelector('.badge').textContent='✓';
+      verdictText.textContent='OK';
+      msg.innerHTML = demoMode==='tags'
+        ? 'Every tag is properly opened and closed.'
+        : 'All brackets are balanced. Strings and <span class="hl">#</span> comments were skipped as expected.';
+      meta.innerHTML='';
+      if(demoMode==='brackets'){
+        meta.innerHTML =
+          '<span class="chip">depth <b>'+r.depth+'</b></span>'+
+          '<span class="chip">() <b>'+r.counts['(']+'</b></span>'+
+          '<span class="chip">[] <b>'+r.counts['[']+'</b></span>'+
+          '<span class="chip">{} <b>'+r.counts['{']+'</b></span>';
+      }
+      exitEl.textContent='0'; exitEl.className='c0';
+    } else {
+      verdict.className='verdict fail';
+      verdict.querySelector('.badge').textContent='✕';
+      verdictText.textContent='MISMATCH';
+      msg.innerHTML='<span class="hl">'+formatMismatch(r).replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span>';
+      meta.innerHTML='<span class="chip">line <b>'+r.line+'</b></span><span class="chip">col <b>'+r.col+'</b></span><span class="chip">kind <b>'+r.kind+'</b></span>';
+      exitEl.textContent='1'; exitEl.className='c1';
+    }
+  }
+
+  input.addEventListener('input', runDemo);
+  modeSeg.querySelectorAll('button').forEach(function(b){
+    b.addEventListener('click', function(){
+      modeSeg.querySelectorAll('button').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      demoMode=b.dataset.mode;
+      fnameEl.textContent = demoMode==='tags' ? 'page.html' : 'input.txt';
+      runDemo();
+    });
+  });
+  document.getElementById('demoPresets').querySelectorAll('.preset').forEach(function(b){
+    b.addEventListener('click', function(){
+      var p=PRESETS[b.dataset.p]; if(!p) return;
+      demoMode=p.mode;
+      modeSeg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x.dataset.mode===p.mode); });
+      fnameEl.textContent = demoMode==='tags' ? 'page.html' : 'input.txt';
+      input.value=p.text;
+      runDemo();
+    });
+  });
+  runDemo();
+
+})();
+</script>
+</body>
+</html>

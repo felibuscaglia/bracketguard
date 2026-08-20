@@ -6,71 +6,61 @@ import argparse
 import sys
 
 from . import __version__
-from .checker import PAIRS, CheckResult, ErrorKind, check
-
-_STATS_MIN_WIDTH = 16
+from .checker import PAIRS, CheckResult, ErrorKind, check, check_tags
 
 
 def _print_stats(result: CheckResult) -> None:
-    rows = [("depth", str(result.depth))]
-    rows.extend(
-        (f"{opener}{closer}", str(result.counts.get(opener, 0)))
+    pairs = ", ".join(
+        f"{opener}{closer} = {result.counts.get(opener, 0)}"
         for opener, closer in PAIRS
     )
-    inner = max(
-        _STATS_MIN_WIDTH,
-        len("Stats"),
-        max(len(label) + 2 + len(value) for label, value in rows),
-    )
-    rule = "─" * (inner + 2)
+    print(f"depth: {result.depth}")
+    print(f"pairs: {pairs}")
 
-    print()
-    print(f"╭{rule}╮")
-    print(f"│ {'Stats'.ljust(inner)} │")
-    print(f"├{rule}┤")
-    for label, value in rows:
-        gap = inner - len(label) - len(value)
-        print(f"│ {label}{' ' * gap}{value} │")
-    print(f"╰{rule}╯")
+
+def _format_mismatch(result: CheckResult) -> str:
+    where = f"MISMATCH at line {result.line}, col {result.col}"
+
+    if result.kind is ErrorKind.MALFORMED_TAG:
+        return f"{where}: malformed tag"
+    if result.kind is ErrorKind.UNTERMINATED_STRING:
+        return f"{where}: unterminated string"
+
+    if result.tags:
+        if result.kind is ErrorKind.UNCLOSED_OPENER:
+            return f"{where}: unclosed {result.found}"
+        if result.expected is None:
+            return f"{where}: unexpected {result.found}"
+        return f"{where}: expected {result.expected} but found {result.found}"
+
+    if result.kind is ErrorKind.UNCLOSED_OPENER:
+        return f"{where}: unclosed '{result.found}'"
+    if result.expected is None:
+        return f"{where}: unexpected '{result.found}'"
+    return f"{where}: expected '{result.expected}' but found '{result.found}'"
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
     """Read the target file and hand its contents to the checker."""
     if len(args.file) != 1:
         args.parser.error("expected one file")
-    args.file = args.file[0]
+    path = args.file[0]
     try:
-        with open(args.file, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             content = fh.read()
-    except FileNotFoundError:
-        print(f"bracketguard: {args.file}: no such file", file=sys.stderr)
-        return 2
-    except OSError as exc:
-        print(f"bracketguard: {args.file}: {exc.strerror}", file=sys.stderr)
+    except OSError:
+        print(f"error: cannot open '{path}'")
         return 2
 
-    result = check(content)
-
+    result = check_tags(content) if args.tags else check(content)
 
     if result.ok:
         print("OK")
-
-        if args.stats:
+        if args.stats and not args.tags:
             _print_stats(result)
-
         return 0
 
-    where = f"MISMATCH at line {result.line}, col {result.col}"
-
-    if result.kind is ErrorKind.UNTERMINATED_STRING:
-        print(f"{where}: unterminated string")
-    elif result.kind is ErrorKind.UNCLOSED_OPENER:
-        print(f"{where}: unclosed '{result.found}'")
-    elif result.expected is None:
-        print(f"{where}: unexpected '{result.found}'")
-    else:
-        print(f"{where}: expected '{result.expected}' but found '{result.found}'")
-
+    print(_format_mismatch(result))
     return 1
 
 
@@ -95,7 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--stats",
         action="store_true",
-        help="Print statistics about the checked file.",
+        help="Print nesting depth and per-type pair counts when balanced.",
+    )
+    check_parser.add_argument(
+        "--tags",
+        action="store_true",
+        help="Validate HTML/XML tag nesting instead of brackets.",
     )
     check_parser.set_defaults(func=_cmd_check, parser=check_parser)
 
